@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import sys
+from datetime import datetime
 
 ########################################################
 # Function to get path to resource (works for PyInstaller)
@@ -13,11 +14,13 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-def createExcel(data, formattedTime):
+def createExcel(saveLoc, data):
+    saveNow = datetime.now()
+    saveTime = saveNow.strftime("%Y-%m-%d %H-%M-%S")
+
     # Create excel name (to desktop)
-    excelName = 'Scrapped Emails ' + formattedTime + '.xlsx'
-    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-    outputFileName = os.path.join(desktop_path, excelName)
+    excelName = 'Scrapped Emails ' + saveTime + '.xlsx'
+    outputFileName = os.path.join(saveLoc, excelName)
 
     # Create excel
     dataframe = pd.DataFrame(data)

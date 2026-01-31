@@ -7,6 +7,7 @@ from tqdm import tqdm
 from datetime import datetime
 import os
 import threading
+from pathlib import Path
 
 # Import custom functions
 import searchForEmails
@@ -68,7 +69,7 @@ def throwError(searchError):
     messagebox.showinfo(title, message)
 
 
-def mainProcessing(cities,state,agencyType,numberOfSearches):
+def mainProcessing(cities,state,agencyType,numberOfSearches,saveLoc):
     townsNotFound = []
     tableData = []
 
@@ -123,7 +124,7 @@ def mainProcessing(cities,state,agencyType,numberOfSearches):
 
     # Export data to excel and format excel
     if tableData:
-        outputFileName = writeData2Excel.createExcel(tableData,formattedTime)
+        outputFileName = writeData2Excel.createExcel(saveLoc,tableData)
         print('')
         print('File saved to: ' + outputFileName)
         logFile.append('')
@@ -190,6 +191,23 @@ class createGUI(wx.Frame):
         # Start the processing in a separate thread to keep GUI responsive
         threading.Thread(target=self._threadedSearch, daemon=True).start()
 
+    def browseSaveLoc(self, event):
+        # Open a directory selection dialog and display the chosen path
+        with wx.DirDialog(
+            self,
+            "Choose a directory",
+            style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST
+        ) as dlg:
+
+            if dlg.ShowModal() == wx.ID_OK:
+                path = dlg.GetPath()
+                if os.path.isdir(path):
+                    self.saveLoc.SetValue(path)
+                else:
+                    wx.MessageBox("Invalid directory selected.", "Error", wx.ICON_ERROR)
+            else:
+                wx.MessageBox("No folder selected.", "Info", wx.ICON_INFORMATION)
+
     def _threadedSearch(self):
         state = self.comb.StringSelection # state
         cities = self.listBox.CheckedStrings # cities
@@ -197,6 +215,7 @@ class createGUI(wx.Frame):
         radio2 = self.radioButton2.Value # search prompt 2
         customSearchPrompt = self.dialog.Value # custom search text
         numberOfSearches = self.searches.Value # number of searches
+        saveLoc = self.saveLoc.Value # save location
 
         # Verify user inputs are valid
         searchError = 0
@@ -234,7 +253,7 @@ class createGUI(wx.Frame):
             wx.CallAfter(throwError, searchError)
             return
         else:
-            mainProcessing(cities,state,agencyType,numberOfSearches)
+            mainProcessing(cities,state,agencyType,numberOfSearches,saveLoc)
 
     # Main Gui layout
     def __init__(self):
@@ -315,6 +334,27 @@ class createGUI(wx.Frame):
         runButtonx,runButtony = getGridLayout(8,8,16,0)
         self.runButton = wx.Button(pa, -1, "Run Program", pos = (runButtonx, runButtony))
         self.runButton.Bind(wx.EVT_BUTTON, self.startSearching)
+
+        # Save File Directory
+        saveLabelx,saveLabely = getGridLayout(10,5,0,0)
+        self.searchLabel = wx.StaticText(pa, label="Save Location", pos=(saveLabelx, saveLabely))
+
+        desktop = Path.home() / "desktop"
+        if desktop.exists():
+            desktop = str(desktop)
+        else:
+            desktop =  ""
+        savex,savey = getGridLayout(11,5,0,0)
+        self.saveLoc = wx.TextCtrl(pa, -1, pos = (savex, savey))
+        saveLoc = self.saveLoc.Size
+        saveLoc.SetWidth(256)
+        self.saveLoc.Size = dialogSize
+        self.saveLoc.Value = desktop
+
+        browseButtonx,browseButtony = getGridLayout(12,8,30,5)
+        self.runButton = wx.Button(pa, -1, "Browse ...", pos = (browseButtonx, browseButtony))
+        self.runButton.Bind(wx.EVT_BUTTON, self.browseSaveLoc)
+
 
         # Start a thread to load Excel data in the background
         threading.Thread(target=self.loadExcelData, daemon=True).start()
