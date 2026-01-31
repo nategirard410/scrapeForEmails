@@ -1,4 +1,3 @@
-
 # Import modules
 import wx
 import pandas
@@ -7,17 +6,11 @@ from tkinter import messagebox
 from tqdm import tqdm
 from datetime import datetime
 import os
-from memory_profiler import profile
-
-# Performance testing modules
-import cProfile
-import pstats
+import threading
 
 # Import custom functions
 import searchForEmails
 import writeData2Excel
-
-
 
 ########################################################
 # Create log file
@@ -75,23 +68,12 @@ def throwError(searchError):
     messagebox.showinfo(title, message)
 
 
-memoryLog = open(logFileName, 'a')
-@profile(stream=memoryLog)
 def mainProcessing(cities,state,agencyType,numberOfSearches):
     townsNotFound = []
     tableData = []
 
     print('')
     print('To cancel search, close command window...')
-
-    #########################################################
-    # Start performance testing
-    profiler = cProfile.Profile()
-    profiler.enable()
-
-
-    #########################################################
-
 
     # Create Header for log file
     logFile.append('Search criteria:')
@@ -120,53 +102,37 @@ def mainProcessing(cities,state,agencyType,numberOfSearches):
                 print("Processing " + town + ", " + state)
 
                 # Scrape for emails
-                townEmails = searchForEmails.getEmails(websites)
+                townEmails, emailURL = searchForEmails.getEmails(websites)
                 logFile.append("     " + str(len(townEmails)) + " emails were found!")
 
                 # If no emails were found, add it to a list of towns without emails
                 if len(townEmails) == 0:
                     townsNotFound.append(town)
 
-                # If 
-                for email in townEmails:
-                    tableData.append([email, town, state, agencyType])
+                for emailIndex, email in enumerate(townEmails):
+                    tableData.append([email, town, state, agencyType,emailURL[emailIndex]])
 
         except:
-            logFile.append("Error processing " + town + ", " + state)
+            logFile.append("Error processing " + town + ", " + state,"")
             townsNotFound.append(town)
     
 
     # Add towns with no emails to the list
     for townIdx in townsNotFound:
-        tableData.append(["", townIdx, state,agencyType])
+        tableData.append(["", townIdx, state,agencyType,""])
 
     # Export data to excel and format excel
-    outputFileName = writeData2Excel.createExcel(tableData,formattedTime)
-    print('')
-    print('File saved to: ' + outputFileName)
-    logFile.append('')
-    logFile.append('File saved to: ' + outputFileName)
-    logFile.append('Processing complete.')
-
-
-    #########################################################
-    # End performance Testing
-    profiler.disable()
-    saveFile = os.path.join("Logs", "performanceResults_" + formattedTime + ".log")
-    profiler.dump_stats(saveFile)
-
-
-    logFile.append('')
-    logFile.append('')
-    logFile.append('#########################################################')
-    logFile.append('##################### Memory Usage ######################')
-    logFile.append('#########################################################')
-    logFile.append('')
-    logFile.append('')
-
-
-    #########################################################
-
+    if tableData:
+        outputFileName = writeData2Excel.createExcel(tableData,formattedTime)
+        print('')
+        print('File saved to: ' + outputFileName)
+        logFile.append('')
+        logFile.append('File saved to: ' + outputFileName)
+        logFile.append('Processing complete.')
+    else:
+        print("No data to save.")
+        messagebox.showinfo('Search Error!', 'No Websites found!')
+        return
 
     # Complete log file and export it. 
     printLogFile(logFile)
@@ -189,16 +155,13 @@ class createGUI(wx.Frame):
         cities = []
 
         if self.state == '':
-
             self.listBox.Set(cities)
-        else:
+        elif self.tableData is not None:
             columnData = list(self.tableData[self.state])
             for item in columnData:
                 if type(item) == str:
                     cities.append(item)
-    
             self.listBox.Set(cities) 
-
 
     # Check all the items in the listbox or uncheck them all based on
     # which button is pressed. If no state is choosen, return control
@@ -214,7 +177,6 @@ class createGUI(wx.Frame):
             for item in items:
                 self.listBox.Check(item, False)
 
-
     # Set the interactivity of the text control based on whether its
     # corresponding radion button is picked
     def toggleDialog(self, event):
@@ -224,17 +186,18 @@ class createGUI(wx.Frame):
             self.dialog.SetValue('Enter custom search parameters...')
             self.dialog.Disable()
 
-
     def startSearching(self, event):
+        # Start the processing in a separate thread to keep GUI responsive
+        threading.Thread(target=self._threadedSearch, daemon=True).start()
 
-        # Reassign as variables
+    def _threadedSearch(self):
         state = self.comb.StringSelection # state
         cities = self.listBox.CheckedStrings # cities
         radio1 = self.radioButton1.Value # search prompt 1
         radio2 = self.radioButton2.Value # search prompt 2
         customSearchPrompt = self.dialog.Value # custom search text
         numberOfSearches = self.searches.Value # number of searches
-        
+
         # Verify user inputs are valid
         searchError = 0
     
@@ -254,7 +217,6 @@ class createGUI(wx.Frame):
             customSearch = True
             agencyType = customSearchPrompt
 
-        # If the user selected custom search, verify a custom search prompt was entered
         if (customSearchPrompt != '') & (customSearchPrompt != 'Enter custom search parameters...'):
             customSearchPrompt = True
 
@@ -267,29 +229,16 @@ class createGUI(wx.Frame):
         except:
             searchError = 7
 
-        # If there's an error in the presets, notify user. If not, start processing
+        # If there's an error, notify user
         if searchError != 0:
-            throwError(searchError)
-            return()
+            wx.CallAfter(throwError, searchError)
+            return
         else:
             mainProcessing(cities,state,agencyType,numberOfSearches)
 
-        return()
-
-
     # Main Gui layout
     def __init__(self):
-        # Get list of US states and filter out only the states that there are cities for
-        self.tableData =  pandas.read_excel('US_States_Cities.xlsx', sheet_name='Sheet1')
-        allStates = self.tableData.columns
-        statesWithData = ['']
-        for [it, self.state] in enumerate(allStates):
-            if type(self.tableData.iloc[0,it]) == str:
-                statesWithData.append(self.state)
-
-
         # Create application object and frame
-        
         windowWidth = 565
         windowHeight = 600
         wx.Frame.__init__(self, None, -1, "Scrape for Emails 1.0", 
@@ -298,6 +247,10 @@ class createGUI(wx.Frame):
         pa = wx.Panel(self,-1)
         pa.SetBackgroundColour((214, 216, 217))
 
+        # Initialize empty data structures
+        self.tableData = None
+        self.statesWithData = ['']
+        self.state = ''
 
         # Create widgets
         statesLabelx,statesLabely = getGridLayout(2,0,60,0)
@@ -305,13 +258,13 @@ class createGUI(wx.Frame):
 
         listBoxx,listBoxy = getGridLayout(6,0,0,0)
         listboxHeight = windowHeight - (listBoxy + 60)
-        self.listBox = wx.CheckListBox(pa, -1, choices=[], pos = (listBoxx, listBoxy), size = (-1,listboxHeight))
+        self.listBox = wx.CheckListBox(pa, -1, choices=["Loading..."], pos = (listBoxx, listBoxy), size = (-1,listboxHeight))
         listBoxSize = self.listBox.Size
         listBoxSize.SetWidth(210)
         self.listBox.Size = listBoxSize
 
         combx,comby = getGridLayout(3,0,0,0)
-        self.comb = wx.Choice(pa, choices = statesWithData, pos = (combx,comby))
+        self.comb = wx.Choice(pa, choices = self.statesWithData, pos = (combx,comby))
         combSize = self.comb.Size
         combSize.SetWidth(210)
         self.comb.Size = combSize
@@ -363,9 +316,30 @@ class createGUI(wx.Frame):
         self.runButton = wx.Button(pa, -1, "Run Program", pos = (runButtonx, runButtony))
         self.runButton.Bind(wx.EVT_BUTTON, self.startSearching)
 
+        # Start a thread to load Excel data in the background
+        threading.Thread(target=self.loadExcelData, daemon=True).start()
+
+    # Load Excel data asynchronously
+    def loadExcelData(self):
+        try:
+            self.tableData = pandas.read_excel('US_States_Cities.xlsx', sheet_name='Sheet1')
+            allStates = self.tableData.columns
+            for it, stateName in enumerate(allStates):
+                if type(self.tableData.iloc[0,it]) == str:
+                    self.statesWithData.append(stateName)
+
+            # Update the combo box on the main thread
+            wx.CallAfter(self.comb.Set, self.statesWithData)
+
+            # Clear the placeholder in the listbox
+            wx.CallAfter(self.listBox.Set, [])
+        except Exception as e:
+            print("Error loading US_States_Cities.xlsx:", e)
+
 
 # Show it and start the event loop
-app1 = wx.App()
-frame = createGUI()
-frame.Show()
-app1.MainLoop()
+if __name__ == "__main__":
+    app1 = wx.App()
+    frame = createGUI()
+    frame.Show()
+    app1.MainLoop()
